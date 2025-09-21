@@ -10,4 +10,3 @@ services:
     restart: always
     volumes:
       - "./.streamlit:/home/app/.streamlit"
-      - "./streamlit_app.py:/home/app/streamlit_app.py"  # Mount your updated file
