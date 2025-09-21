@@ -15,11 +15,23 @@ from PIL import Image, ImageSequence
 from dotenv import load_dotenv
 from gotipy import Gotify
 from loguru import logger
-from rembg.bg import remove
+from rembg import remove, new_session
 
 
-def remove_bg(input_data, path):
-    result = remove(input_data)
+def remove_bg(input_data, path, session, alpha_matting_settings=None):
+    """Remove background with configurable settings"""
+    if alpha_matting_settings:
+        result = remove(
+            input_data,
+            session=session,
+            alpha_matting=True,
+            alpha_matting_foreground_threshold=alpha_matting_settings['foreground_threshold'],
+            alpha_matting_background_threshold=alpha_matting_settings['background_threshold'],
+            alpha_matting_erode_size=alpha_matting_settings['erode_size']
+        )
+    else:
+        result = remove(input_data, session=session)
+
     img = Image.open(io.BytesIO(result)).convert('RGBA')
     if Path(path).suffix != '.png':
         img.LOAD_TRUNCATED_IMAGES = True
@@ -43,17 +55,97 @@ def gif2frames(input_file, skip_every=1):
     return frames
 
 
+def get_available_models():
+    """Return available rembg models"""
+    return [
+        'u2net',
+        'u2netp',
+        'u2net_human_seg',
+        'u2net_cloth_seg',
+        'silueta',
+        'isnet-general-use',
+        'isnet-anime'
+    ]
+
+
 def main():
     if GOTIFY:
         g = Gotify(host_address=os.getenv('GOTIFY_HOST_ADDRESS'),
                    fixed_token=os.getenv('GOTIFY_APP_TOKEN'),
                    fixed_priority=9)
 
+    # Sidebar controls
     if st.sidebar.button('CLEAR'):
         st.session_state['key'] = K
         st.experimental_rerun()
+
     st.sidebar.markdown('---')
 
+    # Model selection
+    st.sidebar.subheader('🤖 Model Settings')
+    available_models = get_available_models()
+    selected_model = st.sidebar.selectbox(
+        'Choose model',
+        available_models,
+        index=0,
+        help='Different models work better for different types of images'
+    )
+
+    # Create session for selected model (cached to avoid recreation)
+    @st.cache_resource
+    def get_model_session(model_name):
+        return new_session(model_name)
+
+    session = get_model_session(selected_model)
+
+    st.sidebar.markdown('---')
+
+    # Alpha matting settings
+    st.sidebar.subheader('🎨 Alpha Matting Settings')
+    enable_alpha_matting = st.sidebar.checkbox(
+        'Enable Alpha Matting',
+        value=False,
+        help='Improves edge quality but increases processing time'
+    )
+
+    alpha_matting_settings = None
+    if enable_alpha_matting:
+        foreground_threshold = st.sidebar.slider(
+            'Foreground Threshold',
+            min_value=1,
+            max_value=500,
+            value=270,
+            step=10,
+            help='Higher values are more selective about foreground'
+        )
+
+        background_threshold = st.sidebar.slider(
+            'Background Threshold',
+            min_value=1,
+            max_value=100,
+            value=20,
+            step=1,
+            help='Lower values remove more background'
+        )
+
+        erode_size = st.sidebar.slider(
+            'Erode Size',
+            min_value=1,
+            max_value=30,
+            value=11,
+            step=1,
+            help='Controls edge refinement'
+        )
+
+        alpha_matting_settings = {
+            'foreground_threshold': foreground_threshold,
+            'background_threshold': background_threshold,
+            'erode_size': erode_size
+        }
+
+    st.sidebar.markdown('---')
+
+    # File upload
     accept_multiple_files = True
     accepted_type = ['png', 'jpg', 'jpeg', 'gif']
 
@@ -73,6 +165,14 @@ def main():
 
     if uploaded_files:
         logger.info(f'Uploaded the following files: {uploaded_files}')
+
+        # Display current settings
+        st.info(f"🤖 **Model:** {selected_model}")
+        if enable_alpha_matting:
+            st.info(
+                f"🎨 **Alpha Matting:** ON (FG: {foreground_threshold}, BG: {background_threshold}, Erode: {erode_size})")
+        else:
+            st.info("🎨 **Alpha Matting:** OFF")
 
         progress_bar = st.empty()
         down_btn = st.empty()
@@ -128,7 +228,9 @@ def main():
                     else:
                         p = Path(uploaded_file.name)
 
-                    img = remove_bg(bytes_data, p)
+                    # Use the session and alpha matting settings
+                    img = remove_bg(bytes_data, p, session,
+                                    alpha_matting_settings)
                     with io.BytesIO() as f:
                         img.save(f, format='PNG', quality=100, subsampling=0)
                         data = f.getvalue()
@@ -197,7 +299,7 @@ if __name__ == '__main__':
 
     load_dotenv()
 
-    MAX_FILES = 10
+    MAX_FILES = 30
     if os.getenv('MAX_FILES'):
         MAX_FILES = int(os.getenv('MAX_FILES'))
 

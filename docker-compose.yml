@@ -1,10 +1,8 @@
 version: "3"
-
 services:
-
   rembg-app:
-    # build: .
-    image: alyetama/rembg-app:latest
+    build: .  # This builds from your local Dockerfile
+    # image: alyetama/rembg-app:latest  # Comment this out
     ports:
       - "8501:8501"
     command: >
@@ -12,3 +10,4 @@ services:
     restart: always
     volumes:
       - "./.streamlit:/home/app/.streamlit"
+      - "./streamlit_app.py:/home/app/streamlit_app.py"  # Mount your updated file
